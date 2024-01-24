@@ -25,7 +25,6 @@ use rpsql::{
 
 fn main() -> Result<(), Box<dyn Error>>{
     let mut pg = Pg::connect("127.0.0.1:5432")?;
-    pg.wait_until_idle()?;
 
     let query = SimpleQuery::new("SELECT * FROM apps LIMIT 10");
     pg.send_message(query)?;
@@ -47,7 +46,7 @@ struct Pg {
 
 impl Pg {
     fn connect(target: &str) -> Result<Self, Box<dyn Error>> {
-        let mut stream = TcpStream::connect(target)?;
+        let stream = TcpStream::connect(target)?;
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
 
         let mut startup_message = StartupMessage::new();
@@ -56,13 +55,14 @@ impl Pg {
         startup_message.add_parameter("application_name", "rpsql");
         startup_message.add_parameter("client_encoding", "UTF8");
 
-        println!("frontend: {startup_message:?}");
-        stream.write_all(&startup_message.encode())?;
-
-        Ok(Self {
+        let mut pg = Self {
             connection: Some(stream),
             ..Default::default()
-        })
+        };
+
+        pg.send_message(startup_message)?;
+        pg.wait_until_idle()?;
+        Ok(pg)
     }
 
     fn read_next_message(&mut self) -> Result<BackendMessage, Box<dyn Error>> {
