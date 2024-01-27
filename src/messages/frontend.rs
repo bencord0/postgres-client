@@ -1,77 +1,80 @@
-pub trait FrontendMessage {
-    fn encode(&self) -> Vec<u8>;
+use std::{
+    error::Error,
+    io::{Cursor, Read},
+    str,
+};
+
+use crate::{messages::Message, readers::*};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrontendMessage {
+    SimpleQuery(SimpleQuery),
+    Termination,
 }
 
-#[derive(Debug)]
-pub struct StartupMessage {
-    protocol_major_version: u16,
-    protocol_minor_version: u16,
-    parameters: Vec<(String, String)>,
-}
-
-impl Default for StartupMessage {
-    fn default() -> Self {
-        Self {
-            protocol_major_version: 3,
-            protocol_minor_version: 0,
-            parameters: vec![],
+impl FrontendMessage {
+    pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
+        let mut header: Vec<u8> = vec![0; 5];
+        let bytes_read = stream.read(&mut header)?;
+        if bytes_read != 5 {
+            return Err("Failed to read header".into());
         }
+
+        let r#type: u8 = header[0];
+        let length: u32 = u32::from_be_bytes(header[1..5].try_into()?);
+
+        let message: FrontendMessage = match r#type {
+            b'Q' => {
+                let mut buffer = Cursor::new(read_bytes(length as usize - 4, stream)?);
+                FrontendMessage::SimpleQuery(SimpleQuery::new(read_string(&mut buffer)?))
+            }
+            b'X' => {
+                assert_eq!(length, 4);
+                FrontendMessage::Termination
+            }
+            unknown_type => {
+                return Err(format!(
+                    "Unknown message type: {} ({unknown_type})",
+                    str::from_utf8(&[unknown_type])?
+                )
+                .into());
+            }
+        };
+
+        Ok(message)
     }
 }
 
-impl StartupMessage {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add_parameter(&mut self, key: &str, value: &str) {
-        self.parameters.push((key.to_string(), value.to_string()));
-    }
-}
-
-impl FrontendMessage for StartupMessage {
+impl Message for FrontendMessage {
     fn encode(&self) -> Vec<u8> {
-        let mut parameter_buffer: Vec<u8> = vec![];
-        for (key, value) in &self.parameters {
-            parameter_buffer.extend_from_slice(key.as_bytes());
-            parameter_buffer.push(0);
+        match self {
+            FrontendMessage::SimpleQuery(query) => query.encode(),
+            FrontendMessage::Termination => {
+                let mut buffer: Vec<u8> = vec![];
 
-            parameter_buffer.extend_from_slice(value.as_bytes());
-            parameter_buffer.push(0);
+                buffer.push(b'X');
+                buffer.extend_from_slice(&4u32.to_be_bytes());
+
+                buffer
+            }
         }
-
-        // 4 bytes for length
-        // 2 bytes for protocol major version
-        // 2 bytes for protocol minor version
-        // 1 byte for null terminator
-        let length: u32 = 4 + 4 + parameter_buffer.len() as u32 + 1;
-
-        let mut buffer: Vec<u8> = vec![];
-
-        buffer.extend_from_slice(&length.to_be_bytes());
-        buffer.extend_from_slice(&self.protocol_major_version.to_be_bytes());
-        buffer.extend_from_slice(&self.protocol_minor_version.to_be_bytes());
-        buffer.extend_from_slice(&parameter_buffer);
-        buffer.push(0);
-
-        buffer
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleQuery {
     query: String,
 }
 
 impl SimpleQuery {
-    pub fn new(query: &str) -> Self {
+    pub fn new(query: impl Into<String>) -> Self {
         Self {
             query: query.into(),
         }
     }
 }
 
-impl FrontendMessage for SimpleQuery {
+impl Message for SimpleQuery {
     fn encode(&self) -> Vec<u8> {
         let mut buffer: Vec<u8> = vec![];
 

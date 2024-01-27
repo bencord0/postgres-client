@@ -1,19 +1,28 @@
-use std::{
-    error::Error,
-    io::{Cursor, Read},
-    str,
-};
+use std::{error::Error, io::Read, str};
 
-#[derive(Debug)]
+use crate::{messages::Message, readers::*, state::TransactionStatus};
+
+#[derive(Debug, Clone)]
 pub enum BackendMessage {
-    AuthenticationOk { length: u32, authentication_type: u32 },
-    ParameterStatus { length: u32, parameter_name: String, parameter_value: String },
-    BackendKeyData { length: u32, process_id: u32, secret_key: u32 },
-    ReadyForQuery { length: u32, transaction_status: TransactionStatus },
-    RowDescription { length: u32, fields: Vec<String> },
-    DataRow { length: u32, fields: Vec<Option<String>> },
-    CommandComplete { length: u32, tag: String },
-    Error { length: u32 },
+    ReadyForQuery {
+        length: u32,
+        transaction_status: TransactionStatus,
+    },
+    RowDescription {
+        length: u32,
+        fields: Vec<String>,
+    },
+    DataRow {
+        length: u32,
+        fields: Vec<Option<String>>,
+    },
+    CommandComplete {
+        length: u32,
+        tag: String,
+    },
+    Error {
+        length: u32,
+    },
 }
 
 impl BackendMessage {
@@ -28,38 +37,9 @@ impl BackendMessage {
         let length: u32 = u32::from_be_bytes(header[1..5].try_into()?);
 
         let message: BackendMessage = match r#type {
-            b'R' => {
-                let buffer = read_bytes(length as usize - 4, stream)?;
-                BackendMessage::AuthenticationOk {
-                    length,
-                    authentication_type: read_u32(&mut &*buffer)?,
-                }
-            },
-            b'S' => {
-                let mut buffer = Cursor::new(read_bytes(length as usize - 4, stream)?);
-                let parameter_name = read_string(&mut buffer)?;
-                let parameter_value = read_string(&mut buffer)?;
-                BackendMessage::ParameterStatus {
-                    length,
-                    parameter_name,
-                    parameter_value,
-                }
-            },
-            b'K' => {
-                let mut buffer = Cursor::new(read_bytes(length as usize - 4, stream)?);
-                let process_id = read_u32(&mut buffer)?;
-                let secret_key = read_u32(&mut buffer)?;
-                BackendMessage::BackendKeyData {
-                    length,
-                    process_id,
-                    secret_key,
-                }
-            },
-            b'Z' => {
-                BackendMessage::ReadyForQuery {
-                    length,
-                    transaction_status: TransactionStatus::from_u8(read_u8(stream)?),
-                }
+            b'Z' => BackendMessage::ReadyForQuery {
+                length,
+                transaction_status: TransactionStatus::from_u8(read_u8(stream)?),
             },
             b'T' => {
                 let field_count = read_u16(stream)? as usize;
@@ -80,7 +60,7 @@ impl BackendMessage {
                     length,
                     fields: fields,
                 }
-            },
+            }
             b'D' => {
                 let field_count = read_u16(stream)? as usize;
                 let mut fields: Vec<Option<String>> = vec![None; field_count as usize];
@@ -99,25 +79,20 @@ impl BackendMessage {
                     }
                 }
 
-                BackendMessage::DataRow {
-                    length,
-                    fields,
-                }
-            },
-            b'C' => {
-                BackendMessage::CommandComplete {
-                    length,
-                    tag: read_string(stream)?,
-                }
+                BackendMessage::DataRow { length, fields }
+            }
+            b'C' => BackendMessage::CommandComplete {
+                length,
+                tag: read_string(stream)?,
             },
             b'E' => {
                 let _ = read_bytes(length as usize - 4, stream)?;
-                BackendMessage::Error {
-                    length,
-                }
-            },
+                BackendMessage::Error { length }
+            }
             _ => {
-                return Err(format!("unhandled message type: {:?}", str::from_utf8(&[r#type])?).into());
+                return Err(
+                    format!("unhandled message type: {:?}", str::from_utf8(&[r#type])?).into(),
+                );
             }
         };
 
@@ -125,56 +100,72 @@ impl BackendMessage {
     }
 }
 
-#[derive(Debug)]
-pub enum TransactionStatus {
-    Unknown,
-    Idle,
-}
+impl Message for BackendMessage {
+    fn encode(&self) -> Vec<u8> {
+        match self {
+            BackendMessage::ReadyForQuery {
+                length,
+                transaction_status,
+            } => {
+                let mut buffer = Vec::new();
+                buffer.push(b'Z');
+                buffer.extend_from_slice(&length.to_be_bytes());
+                buffer.extend_from_slice(&[transaction_status.to_u8()]);
+                buffer
+            }
+            BackendMessage::RowDescription { length, fields } => {
+                let mut buffer = Vec::new();
+                buffer.push(b'T');
+                buffer.extend_from_slice(&length.to_be_bytes());
+                buffer.extend_from_slice(&(fields.len() as u16).to_be_bytes());
 
-impl TransactionStatus {
-    fn from_u8(value: u8) -> Self {
-        match value {
-            b'I' => TransactionStatus::Idle,
-            _ => {
-                panic!("unknown transaction status: {}", str::from_utf8(&[value]).unwrap());
+                for field in fields {
+                    buffer.extend_from_slice(&field.as_bytes());
+                    buffer.push(0);
+                    buffer.extend_from_slice(&0u32.to_be_bytes());
+                    buffer.extend_from_slice(&0u16.to_be_bytes());
+                    buffer.extend_from_slice(&0u32.to_be_bytes());
+                    buffer.extend_from_slice(&0u16.to_be_bytes());
+                    buffer.extend_from_slice(&0u32.to_be_bytes());
+                    buffer.extend_from_slice(&0u16.to_be_bytes());
+                }
+
+                buffer
+            }
+            BackendMessage::DataRow { length, fields } => {
+                let mut buffer = Vec::new();
+                buffer.push(b'D');
+                buffer.extend_from_slice(&length.to_be_bytes());
+                buffer.extend_from_slice(&(fields.len() as u16).to_be_bytes());
+
+                for field in fields {
+                    match field {
+                        Some(value) => {
+                            buffer.extend_from_slice(&(value.len() as u32).to_be_bytes());
+                            buffer.extend_from_slice(&value.as_bytes());
+                        }
+                        None => {
+                            buffer.extend_from_slice(&0xFFFFFFFFu32.to_be_bytes());
+                        }
+                    }
+                }
+
+                buffer
+            }
+            BackendMessage::CommandComplete { length, tag } => {
+                let mut buffer = Vec::new();
+                buffer.push(b'C');
+                buffer.extend_from_slice(&length.to_be_bytes());
+                buffer.extend_from_slice(&tag.as_bytes());
+                buffer.push(0);
+                buffer
+            }
+            BackendMessage::Error { length } => {
+                let mut buffer = Vec::new();
+                buffer.push(b'E');
+                buffer.extend_from_slice(&length.to_be_bytes());
+                buffer
             }
         }
     }
-}
-
-fn read_u8(reader: &mut impl Read) -> Result<u8, Box<dyn Error>> {
-    let mut buffer: [u8; 1] = [0; 1];
-    reader.read_exact(&mut buffer)?;
-    Ok(buffer[0])
-}
-
-fn read_u16(reader: &mut impl Read) -> Result<u16, Box<dyn Error>> {
-    let mut buffer: [u8; 2] = [0; 2];
-    reader.read_exact(&mut buffer)?;
-    Ok(u16::from_be_bytes(buffer))
-}
-
-fn read_u32(reader: &mut impl Read) -> Result<u32, Box<dyn Error>> {
-    let mut buffer: [u8; 4] = [0; 4];
-    reader.read_exact(&mut buffer)?;
-    Ok(u32::from_be_bytes(buffer))
-}
-
-fn read_bytes(length: usize, reader: &mut impl Read) -> Result<Vec<u8>, Box<dyn Error>> {
-    let mut buffer: Vec<u8> = vec![0; length];
-    reader.read_exact(&mut buffer)?;
-    Ok(buffer)
-}
-
-fn read_string(reader: &mut impl Read) -> Result<String, Box<dyn Error>> {
-    let mut buffer: Vec<u8> = vec![];
-    loop {
-        let mut byte: [u8; 1] = [0; 1];
-        reader.read_exact(&mut byte)?;
-        if byte[0] == 0 {
-            break;
-        }
-        buffer.push(byte[0]);
-    }
-    Ok(String::from_utf8(buffer)?)
 }
