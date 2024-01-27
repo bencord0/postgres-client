@@ -79,7 +79,7 @@ impl Message for BackendKeyData {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum TransactionStatus {
     #[default]
     Unknown,

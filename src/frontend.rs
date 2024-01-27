@@ -1,11 +1,6 @@
 use std::{error::Error, io::Write, net::TcpStream};
 
-use crate::messages::{
-    frontend::FrontendMessage,
-    ssl::{SSLMessage, SSLRequest},
-    startup::Startup,
-    Message,
-};
+use crate::messages::{frontend::FrontendMessage, ssl::SSLRequest, startup::Startup, Message};
 
 #[derive(Debug)]
 pub struct Frontend {

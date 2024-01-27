@@ -125,9 +125,9 @@ impl Message for StartupResponse {
 #[derive(Debug, Clone)]
 pub struct Startup {
     length: u32,
-    protocol_major_version: u16,
-    protocol_minor_version: u16,
-    parameters: Vec<(String, String)>,
+    pub protocol_major_version: u16,
+    pub protocol_minor_version: u16,
+    pub parameters: Vec<(String, String)>,
 }
 
 impl Default for Startup {
@@ -160,6 +160,9 @@ impl Startup {
         let length = read_u32(stream)? as usize;
         let protocol_major_version = read_u16(stream)?;
         let protocol_minor_version = read_u16(stream)?;
+
+        assert_eq!(protocol_major_version, 3);
+        assert_eq!(protocol_minor_version, 0);
 
         let mut startup = Startup::new();
         let mut buffer = Cursor::new(read_bytes(length - 8, stream)?);
