@@ -2,12 +2,12 @@ use std::{error::Error, net::TcpStream, time::Duration};
 
 use rpsql::{
     messages::{
-        backend::BackendMessage,
-        frontend::SimpleQuery,
+        backend::{BackendMessage, CommandComplete, DataRow, RowDescription},
+        frontend::{SimpleQuery, Termination},
         ssl::{SSLRequest, SSLResponse},
         startup::{Startup, StartupResponse},
     },
-    state::{Authentication, BackendKeyData, ParameterStatus, ReadyForQuery, TransactionStatus},
+    state::{Authentication, BackendKeyData, ParameterStatus, ReadyForQuery},
     Backend,
 };
 
@@ -58,12 +58,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for message in backend.read_messages()? {
         match message {
-            BackendMessage::RowDescription { fields, .. } => {
+            BackendMessage::RowDescription(RowDescription { fields }) => {
                 println!("row description: {fields:?}");
                 pg.row_description = fields;
             }
 
-            BackendMessage::DataRow { fields, .. } => {
+            BackendMessage::DataRow(DataRow { fields }) => {
                 assert_eq!(fields.len(), pg.row_description.len());
                 println!();
                 for (field, value) in pg.row_description.iter().zip(fields) {
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
 
-            BackendMessage::CommandComplete { tag, .. } => {
+            BackendMessage::CommandComplete(CommandComplete { tag }) => {
                 println!("command complete: {}", tag);
                 pg.row_description.clear();
             }
@@ -87,6 +87,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+
+    let termination = Termination;
+    backend.send_message(termination)?;
 
     Ok(())
 }

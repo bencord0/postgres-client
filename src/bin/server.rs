@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         transaction_status: TransactionStatus::Idle,
                     })?;
                 }
-                FrontendMessage::Termination => continue 'connection,
+                FrontendMessage::Termination(_) => continue 'connection,
             }
         }
     }

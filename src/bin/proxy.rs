@@ -5,11 +5,7 @@ use std::{
 };
 
 use rpsql::{
-    messages::{
-        frontend::FrontendMessage,
-        ssl::{SSLRequest, SSLResponse},
-        startup::StartupRequest,
-    },
+    messages::frontend::{FrontendMessage, Termination},
     Backend, Frontend,
 };
 
@@ -42,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         for frontend_message in frontend.read_messages()? {
             backend.send_message(frontend_message.clone())?;
 
-            if FrontendMessage::Termination == frontend_message {
+            if FrontendMessage::Termination(Termination) == frontend_message {
                 break;
             }
 

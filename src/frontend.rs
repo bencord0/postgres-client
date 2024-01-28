@@ -93,9 +93,9 @@ impl Iterator for MessageIterator {
         }
 
         match FrontendMessage::read_next_message(&mut self.0) {
-            Ok(FrontendMessage::Termination) => {
+            Ok(FrontendMessage::Termination(termination)) => {
                 self.1 = true;
-                Some(FrontendMessage::Termination)
+                Some(FrontendMessage::Termination(termination))
             }
             Ok(message) => Some(message),
             Err(err) => {

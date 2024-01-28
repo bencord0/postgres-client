@@ -9,7 +9,7 @@ use crate::{messages::Message, readers::*};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrontendMessage {
     SimpleQuery(SimpleQuery),
-    Termination,
+    Termination(Termination),
 }
 
 impl FrontendMessage {
@@ -22,15 +22,13 @@ impl FrontendMessage {
 
         let r#type: u8 = header[0];
         let length: u32 = u32::from_be_bytes(header[1..5].try_into()?);
+        let mut buffer = Cursor::new(read_bytes(length as usize - 4, stream)?);
 
         let message: FrontendMessage = match r#type {
-            b'Q' => {
-                let mut buffer = Cursor::new(read_bytes(length as usize - 4, stream)?);
-                FrontendMessage::SimpleQuery(SimpleQuery::new(read_string(&mut buffer)?))
-            }
+            b'Q' => FrontendMessage::SimpleQuery(SimpleQuery::read_next_message(&mut buffer)?),
             b'X' => {
                 assert_eq!(length, 4);
-                FrontendMessage::Termination
+                FrontendMessage::Termination(Termination)
             }
             unknown_type => {
                 return Err(format!(
@@ -49,14 +47,7 @@ impl Message for FrontendMessage {
     fn encode(&self) -> Vec<u8> {
         match self {
             FrontendMessage::SimpleQuery(query) => query.encode(),
-            FrontendMessage::Termination => {
-                let mut buffer: Vec<u8> = vec![];
-
-                buffer.push(b'X');
-                buffer.extend_from_slice(&4u32.to_be_bytes());
-
-                buffer
-            }
+            FrontendMessage::Termination(terminationa) => terminationa.encode(),
         }
     }
 }
@@ -72,6 +63,10 @@ impl SimpleQuery {
             query: query.into(),
         }
     }
+
+    pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
+        Ok(SimpleQuery::new(read_string(stream)?))
+    }
 }
 
 impl Message for SimpleQuery {
@@ -84,6 +79,20 @@ impl Message for SimpleQuery {
         buffer.extend_from_slice(&(self.query.len() as u32 + 4 + 1).to_be_bytes());
         buffer.extend_from_slice(&self.query.as_bytes());
         buffer.push(0);
+
+        buffer
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Termination;
+
+impl Message for Termination {
+    fn encode(&self) -> Vec<u8> {
+        let mut buffer: Vec<u8> = vec![];
+
+        buffer.push(b'X');
+        buffer.extend_from_slice(&4u32.to_be_bytes());
 
         buffer
     }
