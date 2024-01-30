@@ -4,7 +4,13 @@ use std::{
     str,
 };
 
-use crate::{messages::Message, readers::*, state::TransactionStatus};
+use crate::{messages::Message, readers::*};
+
+mod ready_for_query;
+mod row_description;
+pub use ready_for_query::ReadyForQuery;
+pub use row_description::RowDescription;
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendMessage {
@@ -13,59 +19,6 @@ pub enum BackendMessage {
     DataRow(DataRow),
     CommandComplete(CommandComplete),
     Error { length: u32 },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReadyForQuery {
-    pub transaction_status: TransactionStatus,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RowDescription {
-    pub fields: Vec<String>,
-}
-
-impl RowDescription {
-    pub fn builder() -> RowDescriptionBuilder {
-        RowDescriptionBuilder { fields: Vec::new() }
-    }
-}
-
-pub struct RowDescriptionBuilder {
-    fields: Vec<String>,
-}
-
-impl RowDescriptionBuilder {
-    pub fn string_field(mut self, field: impl Into<String>) -> Self {
-        self.fields.push(field.into());
-        self
-    }
-
-    pub fn build(self) -> RowDescription {
-        RowDescription {
-            fields: self.fields,
-        }
-    }
-}
-
-impl RowDescription {
-    pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
-        let field_count = read_u16(stream)? as usize;
-        let mut fields: Vec<String> = vec![String::new(); field_count];
-        for index in 0..field_count {
-            let field_name = read_string(stream)?;
-            let _table_oid = read_u32(stream)?;
-            let _column_index = read_u16(stream)?;
-            let _data_type_oid = read_u32(stream)?;
-            let _data_type_size = read_u16(stream)?;
-            let _type_modifier = read_u32(stream)?;
-            let _format_code = read_u16(stream)?;
-
-            fields[index] = field_name;
-        }
-
-        Ok(Self { fields })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,9 +123,7 @@ impl BackendMessage {
         let mut buffer = Cursor::new(read_bytes(length as usize - 4, stream)?);
 
         let message: BackendMessage = match r#type {
-            b'Z' => BackendMessage::ReadyForQuery(ReadyForQuery {
-                transaction_status: TransactionStatus::from_u8(read_u8(&mut buffer)?),
-            }),
+            b'Z' => BackendMessage::ReadyForQuery(ReadyForQuery::read_next_message(&mut buffer)?),
             b'T' => BackendMessage::RowDescription(RowDescription::read_next_message(&mut buffer)?),
             b'D' => BackendMessage::DataRow(DataRow::read_next_message(&mut buffer)?),
             b'C' => {
@@ -191,152 +142,6 @@ impl BackendMessage {
 
         Ok(message)
     }
-}
-
-impl Message for ReadyForQuery {
-    fn encode(&self) -> Vec<u8> {
-        let mut buffer = Vec::new();
-        buffer.push(b'Z');
-        buffer.extend_from_slice(&5u32.to_be_bytes());
-        buffer.extend_from_slice(&[self.transaction_status.to_u8()]);
-        buffer
-    }
-}
-
-impl Message for RowDescription {
-    fn encode(&self) -> Vec<u8> {
-        let mut field_buffer = Vec::new();
-        for field in &self.fields {
-            // Field Name
-            field_buffer.extend_from_slice(&field.as_bytes());
-            field_buffer.push(0);
-
-            // Table OID (u32) or zero
-            field_buffer.extend_from_slice(&0u32.to_be_bytes());
-
-            // Column Index (u16) or zero
-            field_buffer.extend_from_slice(&0u16.to_be_bytes());
-
-            // Data Type OID (u32)
-            field_buffer.extend_from_slice(&0u32.to_be_bytes());
-
-            // Data Type Size (i16). Negative values denote variable length types.
-            field_buffer.extend_from_slice(&0u16.to_be_bytes());
-
-            // Type Modifier (u32). Type-dependent field.
-            field_buffer.extend_from_slice(&0u32.to_be_bytes());
-
-            // Format Code (u16). 0 = text (or unknown), 1 = binary
-            field_buffer.extend_from_slice(&0u16.to_be_bytes());
-        }
-
-        let mut buffer = Vec::new();
-        buffer.push(b'T');
-
-        // Length of message contents in bytes, including self.
-        buffer.extend_from_slice(&(field_buffer.len() as u32 + 4 + 2).to_be_bytes());
-        // Number of fields in the row.
-        buffer.extend_from_slice(&(self.fields.len() as u16).to_be_bytes());
-        // The fields serialized
-        buffer.extend_from_slice(&field_buffer);
-
-        buffer
-    }
-}
-
-#[test]
-fn test_empty_row_description() -> Result<(), Box<dyn Error>> {
-    let row_description = RowDescription::builder().build();
-
-    let encoded = row_description.encode();
-    assert_eq!(encoded.len(), 7);
-    assert_eq!(
-        encoded,
-        vec![
-            // message tag
-            b'T', // length
-            0x00, 0x00, 0x00, 6, // field count
-            0x00, 0x00,
-        ]
-    );
-
-    let mut cursor = Cursor::new(encoded);
-    let decoded = BackendMessage::read_next_message(&mut cursor)?;
-    assert_eq!(decoded, BackendMessage::RowDescription(row_description));
-
-    Ok(())
-}
-
-#[test]
-fn test_single_row_description() -> Result<(), Box<dyn Error>> {
-    let row_description = RowDescription::builder().string_field("id").build();
-
-    let encoded = row_description.encode();
-    assert_eq!(encoded.len(), 28);
-    assert_eq!(
-        encoded,
-        vec![
-            // tag
-            b'T', // length
-            0x00, 0x00, 0x00, 27, // field count
-            0x00, 0x01, // field name, null terminated
-            b'i', b'd', 0x00, // table oid
-            0x00, 0x00, 0x00, 0x00, // column index
-            0x00, 0x00, // data type oid
-            0x00, 0x00, 0x00, 0x00, // data type size
-            0x00, 0x00, // type modifier
-            0x00, 0x00, 0x00, 0x00, // format code
-            0x00, 0x00,
-        ]
-    );
-
-    let mut cursor = Cursor::new(encoded);
-    let decoded = BackendMessage::read_next_message(&mut cursor)?;
-    assert_eq!(decoded, BackendMessage::RowDescription(row_description));
-
-    Ok(())
-}
-
-#[test]
-fn test_multi_row_description() -> Result<(), Box<dyn Error>> {
-    let row_description = RowDescription::builder()
-        .string_field("id")
-        .string_field("name")
-        .build();
-
-    let encoded = row_description.encode();
-    assert_eq!(encoded.len(), 51);
-    assert_eq!(
-        encoded,
-        vec![
-            // tag
-            b'T', // length
-            0x00, 0x00, 0x00, 50, // field count
-            0x00, 0x02, // `id`
-            // field name, null terminated
-            b'i', b'd', 0x00, // table oid
-            0x00, 0x00, 0x00, 0x00, // column index
-            0x00, 0x00, // data type oid
-            0x00, 0x00, 0x00, 0x00, // data type size
-            0x00, 0x00, // type modifier
-            0x00, 0x00, 0x00, 0x00, // format code
-            0x00, 0x00, // `name`
-            // field name, null terminated
-            b'n', b'a', b'm', b'e', 0x00, // table oid
-            0x00, 0x00, 0x00, 0x00, // column index
-            0x00, 0x00, // data type oid
-            0x00, 0x00, 0x00, 0x00, // data type size
-            0x00, 0x00, // type modifier
-            0x00, 0x00, 0x00, 0x00, // format code
-            0x00, 0x00,
-        ]
-    );
-
-    let mut cursor = Cursor::new(encoded);
-    let decoded = BackendMessage::read_next_message(&mut cursor)?;
-    assert_eq!(decoded, BackendMessage::RowDescription(row_description));
-
-    Ok(())
 }
 
 impl Message for DataRow {
@@ -374,10 +179,9 @@ fn test_empty_data_row() -> Result<(), Box<dyn Error>> {
     assert_eq!(
         encoded,
         vec![
-            // message tag
-            b'D', // length
-            0x00, 0x00, 0x00, 6, // field count
-            0x00, 0x00,
+            b'D',                // message tag
+            0x00, 0x00, 0x00, 6, // length
+            0x00, 0x00,          // field count
         ]
     );
 

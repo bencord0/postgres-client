@@ -1,4 +1,4 @@
-use std::{error::Error, net::TcpStream, time::Duration};
+use std::{error::Error, net::{IpAddr, SocketAddr, TcpStream}, time::Duration};
 
 use rpsql::{
     messages::{
@@ -11,19 +11,46 @@ use rpsql::{
     Backend,
 };
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let mut pg = Pg::new();
-    let mut backend = pg.connect("127.0.0.1:54321")?;
+use clap::Parser;
 
-    let ssl_message = SSLRequest;
-    backend.send_message(ssl_message)?;
-    let SSLResponse::N = backend.read_ssl_message()? else {
-        return Err("expected SSL answer".into());
-    };
+#[derive(Debug, Parser)]
+#[command(author, version)]
+struct Args {
+    #[clap(long, default_value = "127.0.0.1")]
+    host: String,
+
+    #[clap(short, long, default_value = "5432")]
+    port: u16,
+
+    #[clap(short, long)]
+    user: String,
+
+    #[clap(short, long)]
+    database: String,
+
+    #[clap(default_value_t = true, long)]
+    request_ssl: bool,
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
+    let mut pg = Pg::new();
+
+    let host: IpAddr = args.host.parse()?;
+    let sockaddr: SocketAddr = (host, args.port).into();
+    let mut backend = pg.connect(sockaddr)?;
+
+    if args.request_ssl {
+        let ssl_message = SSLRequest;
+        backend.send_message(ssl_message)?;
+        let SSLResponse::N = backend.read_ssl_message()? else {
+            return Err("expected SSL answer".into());
+        };
+    }
 
     let mut startup_message = Startup::new();
-    startup_message.add_parameter("user", "bencord0");
-    startup_message.add_parameter("database", "slingshot");
+    startup_message.add_parameter("user", &args.user);
+    startup_message.add_parameter("database", &args.database);
     startup_message.add_parameter("application_name", "rpsql-client");
     startup_message.add_parameter("client_encoding", "UTF8");
     backend.send_message(startup_message)?;
@@ -37,13 +64,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             StartupResponse::ParameterStatus(ParameterStatus { name, value }) => {
                 println!("parameter status: {name}, {value}");
+                pg.parameters.insert(name, value);
             }
 
             StartupResponse::BackendKeyData(BackendKeyData {
                 process_id,
-                secret_key: _,
+                secret_key,
             }) => {
                 println!("backend data: process_id = {process_id}");
+                pg.key_data = Some(BackendKeyData {
+                    process_id,
+                    secret_key,
+                });
             }
 
             StartupResponse::ReadyForQuery(ReadyForQuery { transaction_status }) => {
@@ -53,27 +85,48 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let query = SimpleQuery::new("SELECT * FROM apps LIMIT 10");
+    let mut prompt = rustyline::DefaultEditor::new()?;
+
+    loop {
+        match prompt.readline(">> ") {
+            Ok(line) => {
+                let query = SimpleQuery::new(line);
+                do_query(&mut pg, &mut backend, query)?;
+            }
+            Err(err) => {
+                eprintln!("EOF: {err}");
+                break
+            }
+        }
+    }
+
+    let termination = Termination;
+    backend.send_message(termination)?;
+
+    Ok(())
+}
+
+fn do_query(pg: &mut Pg, backend: &mut Backend, query: SimpleQuery) -> Result<(), Box<dyn Error>> {
     backend.send_message(query)?;
 
     for message in backend.read_messages()? {
         match message {
-            BackendMessage::RowDescription(RowDescription { fields }) => {
-                println!("row description: {fields:?}");
-                pg.row_description = fields;
+            BackendMessage::RowDescription(row_description) => {
+                pg.row_description = Some(row_description);
             }
 
             BackendMessage::DataRow(DataRow { fields }) => {
-                assert_eq!(fields.len(), pg.row_description.len());
+                let field_names = pg.row_description.clone().unwrap_or_default().field_names();
+                assert_eq!(field_names.len(), fields.len());
                 println!();
-                for (field, value) in pg.row_description.iter().zip(fields) {
-                    println!("  {} = {}", field, value.unwrap_or_else(|| "NULL".into()));
+                for (name, value) in field_names.into_iter().zip(fields) {
+                    println!("  {} = {}", name, value.unwrap_or_else(|| "NULL".into()));
                 }
             }
 
             BackendMessage::CommandComplete(CommandComplete { tag }) => {
                 println!("command complete: {}", tag);
-                pg.row_description.clear();
+                let _ = pg.row_description.take();
             }
 
             BackendMessage::ReadyForQuery { .. } => {
@@ -88,9 +141,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let termination = Termination;
-    backend.send_message(termination)?;
-
     Ok(())
 }
 
@@ -101,7 +151,7 @@ struct Pg {
     key_data: Option<BackendKeyData>,
 
     // Query State
-    row_description: Vec<String>,
+    row_description: Option<RowDescription>,
 }
 
 impl Pg {
@@ -109,7 +159,7 @@ impl Pg {
         Self::default()
     }
 
-    fn connect(&self, target: &str) -> Result<Backend, Box<dyn Error>> {
+    fn connect(&self, target: SocketAddr) -> Result<Backend, Box<dyn Error>> {
         let stream = TcpStream::connect(target)?;
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
 
