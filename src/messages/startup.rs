@@ -12,6 +12,7 @@ use std::{
 pub enum StartupRequest {
     SSLRequest(SSLRequest),
     Startup(Startup),
+    CancelRequest(CancelRequest),
 }
 
 impl StartupRequest {
@@ -23,6 +24,14 @@ impl StartupRequest {
         let mut buffer = Cursor::new(read_bytes(length - 8, stream)?);
         match (length, protocol_major_version, protocol_minor_version) {
             (8, 1234, 5679) => Ok(Self::SSLRequest(SSLRequest)),
+            (16, 1234, 5678) => {
+                let process_id = read_u32(&mut buffer)?;
+                let secret_key = read_u32(&mut buffer)?;
+                Ok(Self::CancelRequest(CancelRequest {
+                    process_id,
+                    secret_key,
+                }))
+            },
             (_, 3, 0) => {
                 let mut startup = Startup::new();
 
@@ -107,6 +116,7 @@ impl Message for StartupRequest {
         match self {
             Self::SSLRequest(ssl_request) => ssl_request.encode(),
             Self::Startup(startup) => startup.encode(),
+            Self::CancelRequest(cancel_request) => cancel_request.encode(),
         }
     }
 }
@@ -197,6 +207,26 @@ impl Message for Startup {
         buffer.extend_from_slice(&self.protocol_minor_version.to_be_bytes());
         buffer.extend_from_slice(&parameter_buffer);
         buffer.push(0);
+
+        buffer
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CancelRequest {
+    pub process_id: u32,
+    pub secret_key: u32,
+}
+
+impl Message for CancelRequest {
+    fn encode(&self) -> Vec<u8> {
+        let mut buffer: Vec<u8> = vec![];
+
+        buffer.extend_from_slice(&16u32.to_be_bytes());
+        buffer.extend_from_slice(&1234u16.to_be_bytes());
+        buffer.extend_from_slice(&5678u16.to_be_bytes());
+        buffer.extend_from_slice(&self.process_id.to_be_bytes());
+        buffer.extend_from_slice(&self.secret_key.to_be_bytes());
 
         buffer
     }

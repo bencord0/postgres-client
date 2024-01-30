@@ -4,7 +4,8 @@ use rpsql::{
     messages::{
         backend::{CommandComplete, DataRow, ReadyForQuery, RowDescription},
         frontend::FrontendMessage,
-        ssl::{SSLRequest, SSLResponse},
+        ssl::SSLResponse,
+        startup::StartupRequest,
     },
     state::{Authentication, TransactionStatus},
     Frontend,
@@ -17,29 +18,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     'connection: for mut frontend in pg.connections() {
         println!("New connection from frontend");
 
-        for ssl_request in frontend.read_ssl_messages()? {
-            if SSLRequest == ssl_request {
-                let ssl_response = SSLResponse::N;
-                frontend.send_message(ssl_response)?;
-            }
-        }
-
         for startup_request in frontend.read_startup_messages()? {
-            let version = (
-                startup_request.protocol_major_version,
-                startup_request.protocol_minor_version,
-            );
-            println!("Startup request from frontend: {:?}", version);
+            match startup_request {
+                StartupRequest::CancelRequest(_) => continue 'connection,
+                StartupRequest::SSLRequest(_) => {
+                    let ssl_response = SSLResponse::N;
+                    frontend.send_message(ssl_response)?;
+                    continue;
+                },
+                StartupRequest::Startup(_) => {
+                    frontend.send_message(Authentication::Ok)?;
 
-            if version == (3, 0) {
-                frontend.send_message(Authentication::Ok)?;
-                frontend.send_message(ReadyForQuery {
-                    transaction_status: TransactionStatus::Idle,
-                })?;
-                break;
+                    frontend.send_message(ReadyForQuery {
+                        transaction_status: TransactionStatus::Idle,
+                    })?;
+                    break;
+                },
             }
-
-            continue 'connection;
         }
 
         for message in frontend.read_messages()? {

@@ -10,22 +10,14 @@ use rpsql::{
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let pg = Pg::bind("127.0.0.1:54321")?;
-    println!("Listening on 127.0.0.1:54321");
+    let pg = Pg::bind("127.0.0.1:54322")?;
+    println!("Listening on 127.0.0.1:54322");
 
     for mut frontend in pg.connections() {
         println!("New connection from frontend");
 
-        let mut backend = pg.connect("127.0.0.1:5432")?;
+        let mut backend = pg.connect("127.0.0.1:54321")?;
         println!("New connection to backend");
-
-        for ssl_request in frontend.read_ssl_messages()? {
-            backend.send_message(ssl_request)?;
-
-            if let Ok(ssl_response) = backend.read_ssl_message() {
-                frontend.send_message(ssl_response)?;
-            }
-        }
 
         for startup_request in frontend.read_startup_messages()? {
             backend.send_message(startup_request)?;
