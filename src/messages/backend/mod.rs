@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{messages::Message, readers::*};
+use tokio::io::{AsyncRead, BufReader};
 
 mod ready_for_query;
 mod row_description;
@@ -65,6 +66,29 @@ impl CommandCompleteBuilder {
 }
 
 impl BackendMessage {
+    pub async fn read_next_message_async<R: AsyncRead + Unpin>(stream: &mut BufReader<R>) -> Result<Self, Box<dyn Error>> {
+        let r#type = read_u8_async(stream).await?;
+
+        let length = read_u32_async(stream).await? as usize;
+        let buffer = read_bytes_async(length - 4, stream).await?;
+        let mut buffer = Cursor::new(buffer);
+
+        let message = match r#type {
+            b'T' => BackendMessage::RowDescription(RowDescription::read_next_message(&mut buffer)?),
+            b'D' => BackendMessage::DataRow(DataRow::read_next_message(&mut buffer)?),
+            b'C' => BackendMessage::CommandComplete(CommandComplete::read_next_message(&mut buffer)?),
+            b'Z' => BackendMessage::ReadyForQuery(ReadyForQuery::read_next_message(&mut buffer)?),
+            b'I' => BackendMessage::EmptyQueryResponse(EmptyQueryResponse::read_next_message(&mut buffer)?),
+            _ => {
+                eprintln!("unhandled message type: {}", str::from_utf8(&[r#type])?);
+                eprintln!("backend message length: {}", length);
+                return Err("not implemented".into());
+            },
+        };
+
+        Ok(message)
+    }
+
     pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
         let mut header: Vec<u8> = vec![0; 5];
         let bytes_read = stream.read(&mut header)?;

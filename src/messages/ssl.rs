@@ -2,6 +2,7 @@ use std::{
     error::Error,
     io::{Cursor, Read},
 };
+use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
 use crate::{messages::Message, readers::*};
 
@@ -12,6 +13,17 @@ impl SSLRequest {
     pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
         let length = read_u32(stream)?;
         let mut buffer = Cursor::new(read_bytes(length as usize - 4, stream)?);
+
+        let protocol_major_version = read_u16(&mut buffer)?;
+        let protocol_minor_version = read_u16(&mut buffer)?;
+        assert_eq!(protocol_major_version, 1234);
+        assert_eq!(protocol_minor_version, 5679);
+        Ok(SSLRequest)
+    }
+
+    pub async fn read_next_message_async<R: AsyncRead + Unpin>(stream: &mut BufReader<R>) -> Result<Self, Box<dyn Error>> {
+        let length = stream.read_u32().await?;
+        let mut buffer = Cursor::new(read_bytes_async(length as usize - 4, stream).await?);
 
         let protocol_major_version = read_u16(&mut buffer)?;
         let protocol_minor_version = read_u16(&mut buffer)?;
@@ -68,6 +80,16 @@ impl Message for SSLResponse {
 impl SSLResponse {
     pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
         let message_type = read_u8(stream)?;
+        match message_type {
+            b'S' => Ok(SSLResponse::S),
+            b'N' => Ok(SSLResponse::N),
+            _ => Err("Unknown ssl response type".into()),
+        }
+    }
+
+    pub async fn read_next_message_async(stream: &mut (impl AsyncReadExt + Unpin)) -> Result<Self, Box<dyn Error>> {
+
+        let message_type = read_u8_async(stream).await?;
         match message_type {
             b'S' => Ok(SSLResponse::S),
             b'N' => Ok(SSLResponse::N),

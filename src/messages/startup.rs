@@ -8,6 +8,7 @@ use std::{
     io::{Cursor, Read},
     str,
 };
+use tokio::io::{AsyncRead, BufReader};
 
 #[derive(Debug, Clone)]
 pub enum StartupRequest {
@@ -63,6 +64,31 @@ pub enum StartupResponse {
 }
 
 impl StartupResponse {
+    pub async fn read_next_message_async<R: AsyncRead + Unpin>(stream: &mut BufReader<R>) -> Result<Option<Self>, Box<dyn Error>> {
+        let r#type = read_u8_async(stream).await?;
+
+        let length = read_u32_async(stream).await? as usize;
+        let mut buffer = Cursor::new(read_bytes_async(length - 4, stream).await?);
+
+        let message = match r#type {
+            b'R' => Some(Self::Authentication(Authentication::read_next_message(&mut buffer)?)),
+            b'S' => Some(Self::ParameterStatus(ParameterStatus::read_next_message(&mut buffer)?)),
+            b'K' => Some(Self::BackendKeyData(BackendKeyData::read_next_message(&mut buffer)?)),
+            b'Z' => Some(Self::ReadyForQuery(ReadyForQuery::read_next_message(&mut buffer)?)),
+            _ => {
+                eprintln!("unsupported message type: {}", str::from_utf8(&[r#type])?);
+                eprintln!("startup response length: {}", length);
+                match str::from_utf8(buffer.get_ref()) {
+                    Ok(s) => eprintln!("buffer: {s}"),
+                    Err(_) => {},
+                };
+                return Err("unsupported message type".into());
+            }
+        };
+
+        Ok(message)
+    }
+
     pub fn read_next_message(stream: &mut impl Read) -> Result<Option<Self>, Box<dyn Error>> {
         let r#type = read_u8(stream)?;
 
