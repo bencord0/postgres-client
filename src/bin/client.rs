@@ -2,12 +2,12 @@ use std::{error::Error, net::{IpAddr, SocketAddr, TcpStream}, time::Duration};
 
 use rpsql::{
     messages::{
-        backend::{BackendMessage, CommandComplete, DataRow, RowDescription},
+        backend::{BackendMessage, CommandComplete, EmptyQueryResponse, DataRow, RowDescription, NoticeMessage},
         frontend::{SimpleQuery, Termination},
         ssl::{SSLRequest, SSLResponse},
         startup::{Startup, StartupResponse},
     },
-    state::{Authentication, BackendKeyData, ParameterStatus, ReadyForQuery},
+    state::{Authentication, BackendKeyData, ParameterStatus, ReadyForQuery, TransactionStatus},
     Backend,
 };
 
@@ -55,6 +55,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     startup_message.add_parameter("client_encoding", "UTF8");
     backend.send_message(startup_message)?;
 
+    do_startup(&mut pg, &mut backend)?;
+    let mut prompt = rustyline::DefaultEditor::new()?;
+
+    loop {
+        match prompt.readline(pg.prompt_prefix.as_str()) {
+            Ok(line) => {
+                let query = SimpleQuery::new(line);
+                do_query(&mut pg, &mut backend, query)?;
+            }
+            Err(err) => {
+                eprintln!("EOF: {err}");
+                break
+            }
+        }
+    }
+
+    let termination = Termination;
+    backend.send_message(termination)?;
+
+    Ok(())
+}
+
+fn do_startup(pg: &mut Pg, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
     for backend_startup_message in backend.read_startup_messages()? {
         match backend_startup_message {
             StartupResponse::Authentication(Authentication::Ok) => {
@@ -80,28 +103,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             StartupResponse::ReadyForQuery(ReadyForQuery { transaction_status }) => {
                 println!("ready for query: {transaction_status}");
+
+                match transaction_status {
+                    TransactionStatus::Idle => {
+                        pg.prompt_prefix = "=>".into();
+                    }
+                    TransactionStatus::InTransaction => {
+                        pg.prompt_prefix = "*>".into();
+                    }
+                    _ => todo!()
+                }
                 break;
             }
         }
     }
-
-    let mut prompt = rustyline::DefaultEditor::new()?;
-
-    loop {
-        match prompt.readline(">> ") {
-            Ok(line) => {
-                let query = SimpleQuery::new(line);
-                do_query(&mut pg, &mut backend, query)?;
-            }
-            Err(err) => {
-                eprintln!("EOF: {err}");
-                break
-            }
-        }
-    }
-
-    let termination = Termination;
-    backend.send_message(termination)?;
 
     Ok(())
 }
@@ -129,13 +144,22 @@ fn do_query(pg: &mut Pg, backend: &mut Backend, query: SimpleQuery) -> Result<()
                 let _ = pg.row_description.take();
             }
 
+            BackendMessage::EmptyQueryResponse(EmptyQueryResponse) => {
+                println!("empty query response");
+                let _ = pg.row_description.take();
+            }
+
             BackendMessage::ReadyForQuery { .. } => {
                 println!("all done");
                 break;
             }
 
+            BackendMessage::NoticeMessage(NoticeMessage{ severity, code, message }) => {
+                println!("notice: severity = {severity}, code = {code}, message = {message}");
+            }
+
             _ => {
-                println!("unhandled message: {:?}", message);
+                println!("client: unhandled message: {:?}", message);
                 break;
             }
         }
@@ -152,6 +176,9 @@ struct Pg {
 
     // Query State
     row_description: Option<RowDescription>,
+
+    // Prompt state
+    prompt_prefix: String,
 }
 
 impl Pg {
