@@ -12,11 +12,13 @@ mod data_row;
 mod empty_query_response;
 mod no_data;
 pub use ready_for_query::ReadyForQuery;
+mod notice_message;
 pub use row_description::RowDescription;
 pub use data_row::DataRow;
 pub use empty_query_response::EmptyQueryResponse;
 pub use no_data::NoData;
 
+pub use notice_message::NoticeMessage;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendMessage {
@@ -26,6 +28,7 @@ pub enum BackendMessage {
     NoData(NoData),
     CommandComplete(CommandComplete),
     EmptyQueryResponse(EmptyQueryResponse),
+    NoticeMessage(NoticeMessage),
     Error { length: u32 },
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +85,7 @@ impl BackendMessage {
                 BackendMessage::CommandComplete(CommandComplete::read_next_message(&mut buffer)?)
             }
             b'I' => BackendMessage::EmptyQueryResponse(EmptyQueryResponse::read_next_message(&mut buffer)?),
+            b'N' => BackendMessage::NoticeMessage(NoticeMessage::read_next_message(&mut buffer)?),
             b'E' => {
                 let _ = read_bytes(length as usize - 4, stream)?;
                 BackendMessage::Error { length }
@@ -215,6 +219,7 @@ impl Message for BackendMessage {
             BackendMessage::NoData(no_data) => no_data.encode(),
             BackendMessage::CommandComplete(command_complete) => command_complete.encode(),
             BackendMessage::EmptyQueryResponse(empty_query_response) => empty_query_response.encode(),
+            BackendMessage::NoticeMessage(notice_message) => notice_message.encode(),
             BackendMessage::Error { length } => {
                 let mut buffer = Vec::new();
                 buffer.push(b'E');
