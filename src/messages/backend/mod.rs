@@ -10,10 +10,12 @@ mod ready_for_query;
 mod row_description;
 mod data_row;
 mod empty_query_response;
+mod no_data;
 pub use ready_for_query::ReadyForQuery;
 pub use row_description::RowDescription;
 pub use data_row::DataRow;
 pub use empty_query_response::EmptyQueryResponse;
+pub use no_data::NoData;
 
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +23,7 @@ pub enum BackendMessage {
     ReadyForQuery(ReadyForQuery),
     RowDescription(RowDescription),
     DataRow(DataRow),
+    NoData(NoData),
     CommandComplete(CommandComplete),
     EmptyQueryResponse(EmptyQueryResponse),
     Error { length: u32 },
@@ -74,6 +77,7 @@ impl BackendMessage {
             b'Z' => BackendMessage::ReadyForQuery(ReadyForQuery::read_next_message(&mut buffer)?),
             b'T' => BackendMessage::RowDescription(RowDescription::read_next_message(&mut buffer)?),
             b'D' => BackendMessage::DataRow(DataRow::read_next_message(&mut buffer)?),
+            b'n' => BackendMessage::NoData(NoData::read_next_message(&mut buffer)?),
             b'C' => {
                 BackendMessage::CommandComplete(CommandComplete::read_next_message(&mut buffer)?)
             }
@@ -208,6 +212,7 @@ impl Message for BackendMessage {
             BackendMessage::ReadyForQuery(ready_for_query) => ready_for_query.encode(),
             BackendMessage::RowDescription(row_description) => row_description.encode(),
             BackendMessage::DataRow(data_row) => data_row.encode(),
+            BackendMessage::NoData(no_data) => no_data.encode(),
             BackendMessage::CommandComplete(command_complete) => command_complete.encode(),
             BackendMessage::EmptyQueryResponse(empty_query_response) => empty_query_response.encode(),
             BackendMessage::Error { length } => {
