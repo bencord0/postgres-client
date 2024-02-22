@@ -1,11 +1,12 @@
 use crate::{
     messages::{ssl::SSLRequest, Message},
     readers::*,
-    state::{Authentication, BackendKeyData, ParameterStatus, ReadyForQuery, TransactionStatus},
+    state::{Authentication, BackendKeyData, ParameterStatus, ReadyForQuery},
 };
 use std::{
     error::Error,
     io::{Cursor, Read},
+    str,
 };
 
 #[derive(Debug, Clone)]
@@ -65,47 +66,24 @@ impl StartupResponse {
     pub fn read_next_message(stream: &mut impl Read) -> Result<Option<Self>, Box<dyn Error>> {
         let r#type = read_u8(stream)?;
 
+        let length = read_u32(stream)? as usize;
+        let mut buffer = Cursor::new(read_bytes(length - 4, stream)?);
+
         let message = match r#type {
-            b'R' => {
-                let length = read_u32(stream)? as usize;
-                let mut buffer = Cursor::new(read_bytes(length - 4, stream)?);
-
-                let authentication_type = read_u32(&mut buffer)?;
-
-                match authentication_type {
-                    0 => Some(Self::Authentication(Authentication::Ok)),
-                    _ => panic!("Unsupported authentication type: {authentication_type}"),
-                }
+            b'R' =>  Some(Self::Authentication(Authentication::read_next_message(&mut buffer)?)),
+            b'S' => Some(Self::ParameterStatus(ParameterStatus::read_next_message(&mut buffer)?)),
+            b'K' => Some(Self::BackendKeyData(BackendKeyData::read_next_message(&mut buffer)?)),
+            b'Z' => Some(Self::ReadyForQuery(ReadyForQuery::read_next_message(&mut buffer)?)),
+            _ => {
+                eprintln!("unsupported message type: {}", str::from_utf8(&[r#type])?);
+                eprintln!("startup response length: {}", length);
+                match str::from_utf8(buffer.get_ref()) {
+                    Ok(s) => eprintln!("buffer: {s}"),
+                    Err(_) => {},
+                };
+                None
             }
-            b'Z' => {
-                let length = read_u32(stream)? as usize;
-                let mut buffer = Cursor::new(read_bytes(length - 4, stream)?);
-
-                let transaction_status = TransactionStatus::from_u8(read_u8(&mut buffer)?);
-                Some(Self::ReadyForQuery(ReadyForQuery { transaction_status }))
-            }
-            b'S' => {
-                let length = read_u32(stream)?;
-                let mut buffer = Cursor::new(read_bytes((length - 4) as usize, stream)?);
-
-                let name = read_string(&mut buffer)?;
-                let value = read_string(&mut buffer)?;
-
-                Some(Self::ParameterStatus(ParameterStatus { name, value }))
-            }
-            b'K' => {
-                let length = read_u32(stream)? as usize;
-                let mut buffer = Cursor::new(read_bytes(length - 4, stream)?);
-
-                let process_id = read_u32(&mut buffer)?;
-                let secret_key = read_u32(&mut buffer)?;
-                Some(Self::BackendKeyData(BackendKeyData {
-                    process_id,
-                    secret_key,
-                }))
-            }
-            _ => panic!("Unsupported message type: {type}"),
-        };
+         };
 
         Ok(message)
     }

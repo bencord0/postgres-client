@@ -1,11 +1,31 @@
-use crate::messages::Message;
-use core::fmt;
-use std::str;
+use crate::{
+    messages::Message,
+    readers::*,
+};
+use core::{
+    fmt,
+};
+use std::{
+    error::Error,
+    io::Read,
+    str,
+};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub enum Authentication {
     #[default]
     Ok,
+}
+
+impl Authentication {
+    pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
+        let authentication_type = read_u32(stream)?;
+
+        match authentication_type {
+            0 => Ok(Authentication::Ok),
+            _ => Err(format!("Unsupported authentication type: {}", authentication_type).into()),
+        }
+    }
 }
 
 impl Message for Authentication {
@@ -40,6 +60,15 @@ pub struct ParameterStatus {
     pub value: String,
 }
 
+impl ParameterStatus {
+    pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
+        let name = read_string(stream)?;
+        let value = read_string(stream)?;
+
+        Ok(ParameterStatus { name, value })
+    }
+}
+
 impl Message for ParameterStatus {
     fn encode(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
@@ -64,6 +93,18 @@ pub struct BackendKeyData {
     pub secret_key: u32,
 }
 
+impl BackendKeyData {
+    pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
+        let process_id = read_u32(stream)?;
+        let secret_key = read_u32(stream)?;
+
+        Ok(BackendKeyData {
+            process_id,
+            secret_key,
+        })
+    }
+}
+
 impl Message for BackendKeyData {
     fn encode(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
@@ -84,14 +125,16 @@ pub enum TransactionStatus {
     #[default]
     Unknown,
     Idle,
-    //T
-    //E
+    InTransaction,
+    InFailedTransaction,
 }
 
 impl TransactionStatus {
     pub(crate) fn from_u8(value: u8) -> Self {
         match value {
             b'I' => TransactionStatus::Idle,
+            b'T' => TransactionStatus::InTransaction,
+            b'E' => TransactionStatus::InFailedTransaction,
             _ => {
                 panic!(
                     "unknown transaction status: {}",
@@ -104,6 +147,8 @@ impl TransactionStatus {
     pub(crate) fn to_u8(&self) -> u8 {
         match self {
             TransactionStatus::Idle => b'I',
+            TransactionStatus::InTransaction => b'T',
+            TransactionStatus::InFailedTransaction => b'E',
             _ => {
                 panic!("unknown transaction status: {:?}", self);
             }
@@ -115,6 +160,8 @@ impl fmt::Display for TransactionStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TransactionStatus::Idle => write!(f, "Idle"),
+            TransactionStatus::InTransaction => write!(f, "In Transaction"),
+            TransactionStatus::InFailedTransaction => write!(f, "In Failed Transaction"),
             _ => {
                 panic!("unknown transaction status: {:?}", self);
             }
@@ -125,6 +172,15 @@ impl fmt::Display for TransactionStatus {
 #[derive(Debug, Default)]
 pub struct ReadyForQuery {
     pub transaction_status: TransactionStatus,
+}
+
+impl ReadyForQuery {
+    pub fn read_next_message(stream: &mut impl Read) -> Result<Self, Box<dyn Error>> {
+        let transaction_status = read_u8(stream)?;
+        let transaction_status = TransactionStatus::from_u8(transaction_status);
+
+        Ok(ReadyForQuery { transaction_status })
+    }
 }
 
 impl Message for ReadyForQuery {
