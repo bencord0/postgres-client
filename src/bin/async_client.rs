@@ -132,8 +132,23 @@ async fn do_query(pg: &mut Pg, backend: &mut Backend, query: SimpleQuery) -> Res
 
     let mut query_messages = backend.read_messages();
     while let Some(query_message) = query_messages.next() {
-        eprintln!("query_message: {:?}", query_message);
-        println!("{:?}", query_message.await?);
+        let query_message = query_message.await?.ok_or("unexpected EOF")?;
+        eprintln!("{:?}", query_message);
+
+        match query_message {
+            BackendMessage::RowDescription(row_description) => {
+                pg.row_description = Some(row_description);
+            }
+
+            BackendMessage::ReadyForQuery{ .. } => {
+                println!("ReadyForQuery");
+                break;
+            }
+
+            _ => {
+                unimplemented!();
+            }
+        }
     }
 
     Ok(())
