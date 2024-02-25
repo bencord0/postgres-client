@@ -6,10 +6,10 @@ use tokio::net::TcpStream;
 use clap::Parser;
 use rpsql::{
     AsyncBackend as Backend,
-    messages::startup::Startup,
+    messages::startup::{Startup, StartupResponse},
     messages::frontend::{SimpleQuery, Termination},
-    messages::backend::RowDescription,
-    state::{Authentication, BackendKeyData},
+    messages::backend::{BackendMessage, RowDescription},
+    state::{Authentication, ParameterStatus, BackendKeyData, ReadyForQuery, TransactionStatus},
 };
 
 #[derive(Debug, Parser)]
@@ -43,11 +43,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
     startup_message.add_parameter("application_name", "pg-async");
     backend.send_message(startup_message).await?;
 
-    let mut startup_messages = backend.read_startup_messages();
-    while let Some(startup_message) = startup_messages.next() {
-        println!("{:?}", startup_message.await?);
-    }
-
+    do_startup(&mut pg, &mut backend).await?;
     let mut prompt = rustyline::DefaultEditor::new()?;
 
     loop {
@@ -92,6 +88,43 @@ impl Pg {
         let backend = Backend::new(stream);
         Ok(backend)
     }
+}
+
+async fn do_startup(pg: &mut Pg, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
+    let mut startup_messages = backend.read_startup_messages();
+    while let Some(startup_message) = startup_messages.next() {
+        let startup_message = startup_message.await?.ok_or("unexpected EOF")?;
+        println!("{:?}", startup_message);
+
+        match startup_message {
+            StartupResponse::Authentication(auth) => {
+                pg.authentication = Some(auth);
+            }
+
+            StartupResponse::ParameterStatus(ParameterStatus {name, value}) => {
+                pg.parameters.insert(name, value);
+            }
+
+            StartupResponse::BackendKeyData(key_data) => {
+                pg.key_data = Some(key_data);
+            }
+
+            StartupResponse::ReadyForQuery(ReadyForQuery { transaction_status }) => {
+                match transaction_status {
+                    TransactionStatus::Idle => {
+                        pg.prompt_prefix = String::from("pg-async=> ");
+                    }
+                    TransactionStatus::InTransaction => {
+                        pg.prompt_prefix = String::from("pg-async*=> ");
+                    }
+                    _ => todo!(),
+                }
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn do_query(pg: &mut Pg, backend: &mut Backend, query: SimpleQuery) -> Result<(), Box<dyn Error>> {
