@@ -131,8 +131,7 @@ async fn do_query(pg: &mut Pg, backend: &mut Backend, query: SimpleQuery) -> Res
     backend.send_message(query).await?;
 
     let mut query_messages = backend.read_messages();
-    while let Some(query_message) = query_messages.next() {
-        let query_message = query_message.await?.ok_or("unexpected EOF")?;
+    while let Some(query_message) = query_messages.next().await {
         eprintln!("{:?}", query_message);
 
         match query_message {
@@ -140,9 +139,23 @@ async fn do_query(pg: &mut Pg, backend: &mut Backend, query: SimpleQuery) -> Res
                 pg.row_description = Some(row_description);
             }
 
-            BackendMessage::ReadyForQuery{ .. } => {
+            BackendMessage::ReadyForQuery { .. } => {
                 println!("ReadyForQuery");
                 break;
+            }
+
+            BackendMessage::DataRow(DataRow { fields }) => {
+                let field_names = pg.row_description.clone().unwrap_or_default().field_names();
+                assert_eq!(field_names.len(), fields.len());
+                println!();
+                for (name, value) in field_names.into_iter().zip(fields) {
+                    println!("{} = {}", name, value.unwrap_or_else(|| "NULL".to_string()));
+                }
+            }
+
+            BackendMessage::CommandComplete(CommandComplete { tag }) => {
+                println!("command complete: {}", tag);
+                let _ = pg.row_description = None;
             }
 
             _ => {

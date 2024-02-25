@@ -1,5 +1,3 @@
-#![feature(async_iterator)]
-
 pub mod messages;
 mod readers;
 pub mod state;

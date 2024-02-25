@@ -128,25 +128,37 @@ impl AsyncBackend {
         }
     }
 
-    pub fn read_messages(
-        &mut self,
-    ) -> impl Iterator<Item=NextBackendMessage> {
+    pub fn read_messages(&mut self) -> impl Stream<Item = BackendMessage> {
         struct MessageIterator {
             reader: Arc<Mutex<BufReader<OwnedReadHalf>>>,
             finished: Arc<AtomicBool>,
         }
-        impl Iterator for MessageIterator {
-            type Item = NextBackendMessage;
+        impl Stream for MessageIterator {
+            type Item = BackendMessage;
 
-            fn next(&mut self) -> Option<Self::Item> {
+            fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 if self.finished.load(Ordering::Relaxed) {
-                    return None;
+                    return Poll::Ready(None);
                 }
 
-                Some(NextBackendMessage {
-                    reader: self.reader.clone(),
-                    finished: self.finished.clone(),
-                })
+                let mut reader = self.reader.lock().unwrap();
+                let mut future = BackendMessage::read_next_message_async(&mut *reader);
+                let x = match std::pin::pin!(future).poll(cx) {
+                    Poll::Ready(Ok(item)) => {
+                        if let BackendMessage::ReadyForQuery(_) = item {
+                            self.finished.store(true, Ordering::Relaxed);
+                        };
+                        Poll::Ready(Some(item))
+                    }
+                    Poll::Ready(Err(err)) => {
+                        self.finished.store(true, Ordering::Relaxed);
+                        //Poll::Ready(Err(err.into()))
+                        eprintln!("error reading backend message: {err}");
+                        Poll::Ready(None)
+                    }
+                    Poll::Pending => Poll::Pending,
+                };
+                x
             }
         }
 
@@ -154,38 +166,5 @@ impl AsyncBackend {
             reader: self.reader.clone(),
             finished: Arc::new(AtomicBool::new(false)),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct NextBackendMessage {
-    reader: Arc<Mutex<BufReader<OwnedReadHalf>>>,
-    finished: Arc<AtomicBool>,
-}
-impl Future for NextBackendMessage {
-    type Output = Result<Option<BackendMessage>, Box<dyn Error>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.finished.load(Ordering::Relaxed) {
-            return Poll::Ready(Ok(None));
-        }
-
-        let mut reader = self.reader.lock().unwrap();
-        let mut future = BackendMessage::read_next_message_async(&mut *reader);
-        let x = match std::pin::pin!(future).poll(cx) {
-            Poll::Ready(Ok(item)) => {
-                if let BackendMessage::ReadyForQuery(_) = item {
-                    self.finished.store(true, Ordering::Relaxed);
-                };
-                Poll::Ready(Ok(Some(item)))
-            },
-            Poll::Ready(Err(err)) => {
-                self.finished.store(true, Ordering::Relaxed);
-                Poll::Ready(Err(err.into()))
-            },
-            Poll::Pending => {
-                Poll::Pending
-            },
-        }; x
     }
 }
