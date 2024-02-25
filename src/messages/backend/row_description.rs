@@ -1,7 +1,4 @@
-use std::{
-    error::Error,
-    io::Read,
-};
+use std::{error::Error, io::Read};
 
 use crate::{messages::Message, readers::*};
 
@@ -124,8 +121,8 @@ impl Message for RowDescription {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::io::Cursor;
     use crate::messages::backend::BackendMessage;
+    use std::io::Cursor;
 
     #[test]
     fn test_empty_row_description() -> Result<(), Box<dyn Error>> {

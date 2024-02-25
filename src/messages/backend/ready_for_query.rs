@@ -1,7 +1,4 @@
-use std::{
-    error::Error,
-    io::Read,
-};
+use std::{error::Error, io::Read};
 
 use crate::{messages::Message, readers::*, state::TransactionStatus};
 
@@ -31,8 +28,8 @@ impl Message for ReadyForQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
     use crate::messages::backend::BackendMessage;
+    use std::io::Cursor;
 
     #[test]
     fn test_ready_for_query() -> Result<(), Box<dyn Error>> {

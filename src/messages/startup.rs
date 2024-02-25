@@ -33,7 +33,7 @@ impl StartupRequest {
                     process_id,
                     secret_key,
                 }))
-            },
+            }
             (_, 3, 0) => {
                 let mut startup = Startup::new();
 
@@ -64,7 +64,9 @@ pub enum StartupResponse {
 }
 
 impl StartupResponse {
-    pub async fn read_next_message_async<R: AsyncRead + Unpin>(stream: &mut BufReader<R>) -> Result<Option<Self>, Box<dyn Error>> {
+    pub async fn read_next_message_async<R: AsyncRead + Unpin>(
+        stream: &mut BufReader<R>,
+    ) -> Result<Option<Self>, Box<dyn Error>> {
         let r#type = read_u8_async(stream).await?;
 
         let length = read_u32_async(stream).await? as usize;
@@ -80,7 +82,7 @@ impl StartupResponse {
                 eprintln!("startup response length: {}", length);
                 match str::from_utf8(buffer.get_ref()) {
                     Ok(s) => eprintln!("buffer: {s}"),
-                    Err(_) => {},
+                    Err(_) => {}
                 };
                 return Err("unsupported message type".into());
             }
@@ -105,11 +107,11 @@ impl StartupResponse {
                 eprintln!("startup response length: {}", length);
                 match str::from_utf8(buffer.get_ref()) {
                     Ok(s) => eprintln!("buffer: {s}"),
-                    Err(_) => {},
+                    Err(_) => {}
                 };
                 None
             }
-         };
+        };
 
         Ok(message)
     }

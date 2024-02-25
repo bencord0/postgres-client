@@ -21,7 +21,9 @@ impl SSLRequest {
         Ok(SSLRequest)
     }
 
-    pub async fn read_next_message_async<R: AsyncRead + Unpin>(stream: &mut BufReader<R>) -> Result<Self, Box<dyn Error>> {
+    pub async fn read_next_message_async<R: AsyncRead + Unpin>(
+        stream: &mut BufReader<R>,
+    ) -> Result<Self, Box<dyn Error>> {
         let length = stream.read_u32().await?;
         let mut buffer = Cursor::new(read_bytes_async(length as usize - 4, stream).await?);
 
@@ -87,8 +89,9 @@ impl SSLResponse {
         }
     }
 
-    pub async fn read_next_message_async(stream: &mut (impl AsyncReadExt + Unpin)) -> Result<Self, Box<dyn Error>> {
-
+    pub async fn read_next_message_async(
+        stream: &mut (impl AsyncReadExt + Unpin),
+    ) -> Result<Self, Box<dyn Error>> {
         let message_type = read_u8_async(stream).await?;
         match message_type {
             b'S' => Ok(SSLResponse::S),

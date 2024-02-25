@@ -1,17 +1,14 @@
-use std::{
-    collections::HashMap,
-    error::Error,
-};
-use tokio::net::TcpStream;
-use tokio_stream::StreamExt;
 use clap::Parser;
 use rpsql::{
-    AsyncBackend as Backend,
-    messages::startup::{Startup, StartupResponse},
+    messages::backend::{BackendMessage, CommandComplete, DataRow, RowDescription},
     messages::frontend::{SimpleQuery, Termination},
-    messages::backend::{BackendMessage, RowDescription, DataRow, CommandComplete},
-    state::{Authentication, ParameterStatus, BackendKeyData, ReadyForQuery, TransactionStatus},
+    messages::startup::{Startup, StartupResponse},
+    state::{Authentication, BackendKeyData, ParameterStatus, ReadyForQuery, TransactionStatus},
+    AsyncBackend as Backend,
 };
+use std::{collections::HashMap, error::Error};
+use tokio::net::TcpStream;
+use tokio_stream::StreamExt;
 
 #[derive(Debug, Parser)]
 #[command(author, version)]
@@ -30,7 +27,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>>{
+async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     let mut pg = Pg::new();
@@ -55,7 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
             }
             Err(err) => {
                 eprintln!("EOF: {err}");
-                break
+                break;
             }
         }
     }
@@ -101,7 +98,7 @@ async fn do_startup(pg: &mut Pg, backend: &mut Backend) -> Result<(), Box<dyn Er
                 pg.authentication = Some(auth);
             }
 
-            StartupResponse::ParameterStatus(ParameterStatus {name, value}) => {
+            StartupResponse::ParameterStatus(ParameterStatus { name, value }) => {
                 pg.parameters.insert(name, value);
             }
 
@@ -127,7 +124,11 @@ async fn do_startup(pg: &mut Pg, backend: &mut Backend) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-async fn do_query(pg: &mut Pg, backend: &mut Backend, query: SimpleQuery) -> Result<(), Box<dyn Error>> {
+async fn do_query(
+    pg: &mut Pg,
+    backend: &mut Backend,
+    query: SimpleQuery,
+) -> Result<(), Box<dyn Error>> {
     backend.send_message(query).await?;
 
     let mut query_messages = backend.read_messages();

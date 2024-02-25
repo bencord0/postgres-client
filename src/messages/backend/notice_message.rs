@@ -1,19 +1,12 @@
+use crate::{messages::Message, readers::*};
 use core::fmt;
-use std::{
-    error::Error,
-    io::Read,
-};
-use crate::{
-    messages::Message,
-    readers::*,
-};
+use std::{error::Error, io::Read};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoticeMessage {
     pub severity: Severity,
     pub code: String,
     pub message: String,
-
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -35,7 +28,7 @@ impl NoticeMessage {
                 b'S' => {
                     let severity = Severity::read_next_message(stream)?;
                     builder = builder.severity(severity);
-                },
+                }
                 b'V' => {
                     let severity = match read_string(stream)?.as_str() {
                         "WARNING" => Severity::Warning,
@@ -46,24 +39,24 @@ impl NoticeMessage {
                         other => Severity::Localized(other.to_string()),
                     };
                     builder = builder.severity(severity);
-                },
+                }
                 b'C' => {
                     let code = read_string(stream)?;
                     builder = builder.code(code);
-                },
+                }
                 b'M' => {
                     let message = read_string(stream)?;
                     builder = builder.message(message);
-                },
+                }
                 b'F' => {
                     let _file_name = read_string(stream)?;
-                },
+                }
                 b'L' => {
                     let _line_no = read_string(stream)?;
-                },
+                }
                 b'R' => {
                     let _routine = read_string(stream)?;
-                },
+                }
                 0 => break,
 
                 field_type => {
@@ -73,7 +66,7 @@ impl NoticeMessage {
                     eprintln!("  : {field_value}");
 
                     continue;
-                },
+                }
             }
         }
 
@@ -205,8 +198,8 @@ impl NoticeMessageBuilder {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::io::Cursor;
     use crate::messages::backend::BackendMessage;
+    use std::io::Cursor;
 
     //#[test]
     //fn test_notice_message() -> Result<(), Box<dyn Error>> {

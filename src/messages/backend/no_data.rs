@@ -1,8 +1,5 @@
-use std::{
-    error::Error,
-    io::Read,
-};
 use crate::messages::Message;
+use std::{error::Error, io::Read};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoData;

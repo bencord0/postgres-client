@@ -30,15 +30,15 @@ impl Frontend {
                             StartupRequest::CancelRequest(_) => {
                                 self.1 = true;
                                 println!("cancel request");
-                            },
+                            }
                             StartupRequest::Startup(_) => {
                                 self.1 = true;
                                 println!("startup");
-                            },
+                            }
                             StartupRequest::SSLRequest(_) => {
                                 self.1 = false;
                                 println!("ssl request");
-                            },
+                            }
                         }
                         Some(message)
                     }

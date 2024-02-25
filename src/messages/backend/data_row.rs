@@ -1,9 +1,5 @@
-use std::{
-    error::Error,
-    io::Read,
-    str,
-};
 use crate::readers::*;
+use std::{error::Error, io::Read, str};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataRow {

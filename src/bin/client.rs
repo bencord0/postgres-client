@@ -1,8 +1,15 @@
-use std::{error::Error, net::{IpAddr, SocketAddr, TcpStream}, time::Duration};
+use std::{
+    error::Error,
+    net::{IpAddr, SocketAddr, TcpStream},
+    time::Duration,
+};
 
 use rpsql::{
     messages::{
-        backend::{BackendMessage, CommandComplete, EmptyQueryResponse, DataRow, RowDescription, NoticeMessage},
+        backend::{
+            BackendMessage, CommandComplete, DataRow, EmptyQueryResponse, NoticeMessage,
+            RowDescription,
+        },
         frontend::{SimpleQuery, Termination},
         ssl::{SSLRequest, SSLResponse},
         startup::{Startup, StartupResponse},
@@ -66,7 +73,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Err(err) => {
                 eprintln!("EOF: {err}");
-                break
+                break;
             }
         }
     }
@@ -111,7 +118,7 @@ fn do_startup(pg: &mut Pg, backend: &mut Backend) -> Result<(), Box<dyn Error>> 
                     TransactionStatus::InTransaction => {
                         pg.prompt_prefix = "*>".into();
                     }
-                    _ => todo!()
+                    _ => todo!(),
                 }
                 break;
             }
@@ -154,7 +161,11 @@ fn do_query(pg: &mut Pg, backend: &mut Backend, query: SimpleQuery) -> Result<()
                 break;
             }
 
-            BackendMessage::NoticeMessage(NoticeMessage{ severity, code, message }) => {
+            BackendMessage::NoticeMessage(NoticeMessage {
+                severity,
+                code,
+                message,
+            }) => {
                 println!("notice: severity = {severity}, code = {code}, message = {message}");
             }
 

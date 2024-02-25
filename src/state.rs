@@ -1,15 +1,6 @@
-use crate::{
-    messages::Message,
-    readers::*,
-};
-use core::{
-    fmt,
-};
-use std::{
-    error::Error,
-    io::Read,
-    str,
-};
+use crate::{messages::Message, readers::*};
+use core::fmt;
+use std::{error::Error, io::Read, str};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub enum Authentication {

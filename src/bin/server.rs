@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let ssl_response = SSLResponse::N;
                     frontend.send_message(ssl_response)?;
                     continue;
-                },
+                }
                 StartupRequest::Startup(_) => {
                     frontend.send_message(Authentication::Ok)?;
 
@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         transaction_status: TransactionStatus::Idle,
                     })?;
                     break;
-                },
+                }
             }
         }
 

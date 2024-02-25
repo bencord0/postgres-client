@@ -7,19 +7,18 @@ use std::{
 use crate::{messages::Message, readers::*};
 use tokio::io::{AsyncRead, BufReader};
 
-mod ready_for_query;
-mod row_description;
 mod data_row;
 mod empty_query_response;
 mod no_data;
-pub use ready_for_query::ReadyForQuery;
 mod notice_message;
-pub use row_description::RowDescription;
+mod ready_for_query;
+mod row_description;
 pub use data_row::DataRow;
 pub use empty_query_response::EmptyQueryResponse;
 pub use no_data::NoData;
-
 pub use notice_message::NoticeMessage;
+pub use ready_for_query::ReadyForQuery;
+pub use row_description::RowDescription;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendMessage {
@@ -66,7 +65,9 @@ impl CommandCompleteBuilder {
 }
 
 impl BackendMessage {
-    pub async fn read_next_message_async<R: AsyncRead + Unpin>(stream: &mut BufReader<R>) -> Result<Self, Box<dyn Error>> {
+    pub async fn read_next_message_async<R: AsyncRead + Unpin>(
+        stream: &mut BufReader<R>,
+    ) -> Result<Self, Box<dyn Error>> {
         let r#type = read_u8_async(stream).await?;
 
         let length = read_u32_async(stream).await? as usize;
@@ -83,7 +84,7 @@ impl BackendMessage {
                 eprintln!("unhandled message type: {}", str::from_utf8(&[r#type])?);
                 eprintln!("backend message length: {}", length);
                 return Err("not implemented".into());
-            },
+            }
         };
 
         Ok(message)

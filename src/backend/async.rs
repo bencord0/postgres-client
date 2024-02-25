@@ -1,14 +1,17 @@
-use std::{
-    error::Error,
-    ops::DerefMut,
-    sync::{Arc, atomic::{AtomicBool, Ordering}, Mutex},
-};
 use core::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 use futures_core::stream::Stream;
+use std::{
+    error::Error,
+    ops::DerefMut,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+};
 use tokio::{
     io::BufReader,
     net::{
@@ -17,10 +20,8 @@ use tokio::{
     },
 };
 
-use crate::{
-    messages::{
-        backend::BackendMessage, ssl::SSLResponse, startup::StartupResponse, Message,
-    },
+use crate::messages::{
+    backend::BackendMessage, ssl::SSLResponse, startup::StartupResponse, Message,
 };
 
 #[derive(Debug)]
@@ -81,9 +82,7 @@ impl AsyncBackend {
         }
     }
 
-    pub fn read_startup_messages(
-        &mut self,
-    ) -> impl Stream<Item=StartupResponse> {
+    pub fn read_startup_messages(&mut self) -> impl Stream<Item = StartupResponse> {
         struct MessageIterator {
             reader: Arc<Mutex<BufReader<OwnedReadHalf>>>,
             finished: Arc<AtomicBool>,
@@ -104,21 +103,20 @@ impl AsyncBackend {
                             self.finished.store(true, Ordering::Relaxed);
                         };
                         Poll::Ready(Some(item))
-                    },
+                    }
                     Poll::Ready(Ok(None)) => {
                         self.finished.store(true, Ordering::Relaxed);
                         Poll::Ready(None)
-                    },
+                    }
                     Poll::Ready(Err(err)) => {
                         self.finished.store(true, Ordering::Relaxed);
                         //Poll::Ready(Err(err.into()))
-                        eprintln!("error reading backend message: {err}");
+                        eprintln!("error reading backend startup message: {err}");
                         Poll::Ready(None)
-                    },
-                    Poll::Pending => {
-                        Poll::Pending
-                    },
-                }; x
+                    }
+                    Poll::Pending => Poll::Pending,
+                };
+                x
             }
         }
 
