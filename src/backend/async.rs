@@ -8,6 +8,7 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use futures_core::stream::Stream;
 use tokio::{
     io::BufReader,
     net::{
@@ -82,23 +83,42 @@ impl AsyncBackend {
 
     pub fn read_startup_messages(
         &mut self,
-    ) -> impl Iterator<Item=NextStartupResponse> {
+    ) -> impl Stream<Item=StartupResponse> {
         struct MessageIterator {
             reader: Arc<Mutex<BufReader<OwnedReadHalf>>>,
             finished: Arc<AtomicBool>,
         }
-        impl Iterator for MessageIterator {
-            type Item = NextStartupResponse;
+        impl Stream for MessageIterator {
+            type Item = StartupResponse;
 
-            fn next(&mut self) -> Option<Self::Item> {
+            fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 if self.finished.load(Ordering::Relaxed) {
-                    return None;
+                    return Poll::Ready(None);
                 }
 
-                Some(NextStartupResponse {
-                    reader: self.reader.clone(),
-                    finished: self.finished.clone(),
-                })
+                let mut reader = self.reader.lock().unwrap();
+                let mut future = StartupResponse::read_next_message_async(&mut *reader);
+                let x = match std::pin::pin!(future).poll(cx) {
+                    Poll::Ready(Ok(Some(item))) => {
+                        if let StartupResponse::ReadyForQuery(_) = item {
+                            self.finished.store(true, Ordering::Relaxed);
+                        };
+                        Poll::Ready(Some(item))
+                    },
+                    Poll::Ready(Ok(None)) => {
+                        self.finished.store(true, Ordering::Relaxed);
+                        Poll::Ready(None)
+                    },
+                    Poll::Ready(Err(err)) => {
+                        self.finished.store(true, Ordering::Relaxed);
+                        //Poll::Ready(Err(err.into()))
+                        eprintln!("error reading backend message: {err}");
+                        Poll::Ready(None)
+                    },
+                    Poll::Pending => {
+                        Poll::Pending
+                    },
+                }; x
             }
         }
 
@@ -134,43 +154,6 @@ impl AsyncBackend {
             reader: self.reader.clone(),
             finished: Arc::new(AtomicBool::new(false)),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct NextStartupResponse {
-    reader: Arc<Mutex<BufReader<OwnedReadHalf>>>,
-    finished: Arc<AtomicBool>,
-}
-impl Future for NextStartupResponse {
-    type Output = Result<Option<StartupResponse>, Box<dyn Error>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.finished.load(Ordering::Relaxed) {
-            return Poll::Ready(Ok(None));
-        }
-
-        let mut reader = self.reader.lock().unwrap();
-        let mut future = StartupResponse::read_next_message_async(&mut *reader);
-        let x = match std::pin::pin!(future).poll(cx) {
-            Poll::Ready(Ok(Some(item))) => {
-                if let StartupResponse::ReadyForQuery(_) = item {
-                    self.finished.store(true, Ordering::Relaxed);
-                };
-                Poll::Ready(Ok(Some(item)))
-            },
-            Poll::Ready(Ok(None)) => {
-                self.finished.store(true, Ordering::Relaxed);
-                Poll::Ready(Ok(None))
-            },
-            Poll::Ready(Err(err)) => {
-                self.finished.store(true, Ordering::Relaxed);
-                Poll::Ready(Err(err.into()))
-            },
-            Poll::Pending => {
-                Poll::Pending
-            },
-        }; x
     }
 }
 

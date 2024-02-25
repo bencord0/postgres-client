@@ -3,12 +3,13 @@ use std::{
     error::Error,
 };
 use tokio::net::TcpStream;
+use tokio_stream::StreamExt;
 use clap::Parser;
 use rpsql::{
     AsyncBackend as Backend,
     messages::startup::{Startup, StartupResponse},
     messages::frontend::{SimpleQuery, Termination},
-    messages::backend::{BackendMessage, RowDescription},
+    messages::backend::{BackendMessage, RowDescription, DataRow, CommandComplete},
     state::{Authentication, ParameterStatus, BackendKeyData, ReadyForQuery, TransactionStatus},
 };
 
@@ -92,8 +93,7 @@ impl Pg {
 
 async fn do_startup(pg: &mut Pg, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
     let mut startup_messages = backend.read_startup_messages();
-    while let Some(startup_message) = startup_messages.next() {
-        let startup_message = startup_message.await?.ok_or("unexpected EOF")?;
+    while let Some(startup_message) = startup_messages.next().await {
         println!("{:?}", startup_message);
 
         match startup_message {
